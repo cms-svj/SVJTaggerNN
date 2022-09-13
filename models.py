@@ -33,30 +33,33 @@ class DNN_GRF(nn.Module):
         self.feature = nn.Sequential()
         self.feature.add_module('i_linear1', nn.Linear(n_var, n_nodes))
         self.feature.add_module('i_relu1',   nn.ReLU())
+        self.feature.add_module('i_batchNorm1', nn.BatchNorm1d(n_nodes))
         for i, n in enumerate(list(n_nodes for x in range(n_layers_features))):
             self.feature.add_module('f_linear{}'.format(i+1), nn.Linear(n_nodes, n_nodes))
             self.feature.add_module('f_relu{}'.format(i+1),   nn.ReLU())
+            self.feature.add_module('f_batchNorm{}'.format(i+1), nn.BatchNorm1d(n_nodes))
 
         # Jet tagger classifier
         self.tagger = nn.Sequential()
         for i, n in enumerate(list(n_nodes for x in range(n_layers_tag))):
             self.tagger.add_module('t_linear{}'.format(i+1), nn.Linear(n_nodes, n_nodes))
             self.tagger.add_module('t_relu{}'.format(i+1),   nn.ReLU())
+            self.feature.add_module('t_batchNorm{}'.format(i+1), nn.BatchNorm1d(n_nodes))
         self.tagger.add_module('t_dropout',   nn.Dropout(p=drop_out_p))
         self.tagger.add_module('t_linearOut', nn.Linear(n_nodes, n_outputs))
 
         # Jet pT classifier
         self.pTClass = nn.Sequential()
-        for i, n in enumerate(list(n_nodes for x in range(n_layers_pT))):
-            self.pTClass.add_module('p_linear{}'.format(i+1), nn.Linear(n_nodes, n_nodes))
-            self.pTClass.add_module('p_relu{}'.format(i+1),   nn.ReLU())
-        self.pTClass.add_module('p_dropout',   nn.Dropout(p=drop_out_p))
+        # for i, n in enumerate(list(n_nodes for x in range(n_layers_pT))):
+        #     self.pTClass.add_module('p_linear{}'.format(i+1), nn.Linear(n_nodes, n_nodes))
+        #     self.pTClass.add_module('p_relu{}'.format(i+1),   nn.ReLU())
+        # self.pTClass.add_module('p_dropout',   nn.Dropout(p=drop_out_p))
         self.pTClass.add_module('p_linearOut', nn.Linear(n_nodes, n_pTBins))
-        
+
     def forward(self, input_data, lambdaGR=1.0):
         feature = self.feature(input_data)
         tagger_output = self.tagger(feature)
-        #reverse_feature = feature
+        # reverse_feature = feature
         reverse_feature = GradientReversalFunction.apply(feature, lambdaGR)
         pTClass_output = self.pTClass(reverse_feature)
         return tagger_output, pTClass_output

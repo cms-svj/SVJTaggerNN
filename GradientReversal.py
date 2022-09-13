@@ -7,12 +7,12 @@ from torch.autograd import Function
 class GradientReversalFunction(Function):
     @staticmethod
     def forward(ctx, x, lambda_):
-        ctx.lambda_ = lambda_
+        ctx.lambdaSVJTagger_ = lambda_
         return x.view_as(x)
 
     @staticmethod
     def backward(ctx, grad_output):
-        dx = ctx.lambda_ * grad_output.neg()
+        dx = ctx.lambdaSVJTagger_ * grad_output.neg()
         return dx, None
 
 ########################################################################################
@@ -49,5 +49,3 @@ class GradientReversal(Module):
 
     def forward(self, x):
         return GRF.apply(x, self.lambda_)
-
-
