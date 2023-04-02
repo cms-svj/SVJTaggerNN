@@ -6,7 +6,7 @@ from torch.cuda.amp import autocast
 import os
 import particlenet_pf
 from models import DNN, DNN_GRF
-from dataset_el import RootDataset, get_sizes
+from dataset import RootDataset, get_sizes
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from magiconfig import ArgumentParser, MagiConfigOptions, ArgumentDefaultsRawHelpFormatter
