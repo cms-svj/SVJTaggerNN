@@ -4,7 +4,7 @@ import torch.nn.functional as f
 from torch.autograd import Variable
 from GradientReversal import GradientReversalFunction
 from GradientReversal import GradientReversal as GR
-from torchsummary import summary
+#from torchsummary import summary
 
 class DNN(nn.Module):
     def __init__(self, n_var=10, n_layers=1, n_nodes=100, n_outputs=2, drop_out_p=0.3):
@@ -91,7 +91,7 @@ if __name__=="__main__":
 
     # Print model info
     dnn = DNN(n_var=10, n_layers=1)
-    summary(dnn, (1,10))
+    #summary(dnn, (1,10))
     out = dnn(input)
     print(out)
 
