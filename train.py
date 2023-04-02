@@ -9,7 +9,7 @@ import torch.utils.data as udata
 import torch.optim as optim
 import os
 from models import DNN, DNN_GRF
-from dataset_el import RootDataset, get_sizes
+from dataset import RootDataset, get_sizes
 import matplotlib.pyplot as plt
 from magiconfig import ArgumentParser, MagiConfigOptions, ArgumentDefaultsRawHelpFormatter
 from configs import configs as c

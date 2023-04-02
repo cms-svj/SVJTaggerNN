@@ -45,7 +45,7 @@ class RootDataset(udata.Dataset):
             for fileName in fileList:
                 f = up.open(path  + fileName + ".root")
                 print(fileName)
-                var = f["tree"].arrays(self.eventVar + self.jetVar,  library="pd")#.head(10000)
+                var = f["tree"].arrays(self.eventVar + self.jetVar,  library="pd")#.head(100)
                 var = var.filter(regex='[0]|[1]|[2]')
                 var["label"] = [i+labelShift]*len(var)
                 vars = pd.concat([vars, var]) if vars is not None else var
