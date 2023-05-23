@@ -4,7 +4,6 @@ from torch.nn import functional as f
 import torch.utils.data as udata
 from torch.cuda.amp import autocast
 import os
-import particlenet_pf
 from models import DNN, DNN_GRF
 from dataset import RootDataset, get_sizes
 import matplotlib as mpl
@@ -469,7 +468,7 @@ def main():
     ds = args.dataset
     hyper = args.hyper
     ft = args.features
-    dataset = RootDataset(ds.path, ds.signal, ds.background, ft.eventVariables, ft.jetVariables)
+    dataset = RootDataset(ds.path, ds.signal, ds.background, ft.eventVariables, ft.jetVariables, ft.numOfJetsToKeep)
     sizes = get_sizes(len(dataset), ds.sample_fractions)
     train, val, test = udata.random_split(dataset, sizes, generator=torch.Generator().manual_seed(42))
 
@@ -478,7 +477,7 @@ def main():
     #model = DNN_GRF(n_var=len(varSet), n_layers_features=hyper.num_of_layers_features, n_layers_tag=hyper.num_of_layers_tag, n_layers_pT=hyper.num_of_layers_pT, n_nodes=hyper.num_of_nodes, n_outputs=2, n_pTBins=hyper.n_pTBins, drop_out_p=hyper.dropout).to(device=device)
     model = copy.deepcopy(model)
     print("Loading model from file " + modelLocation)
-    model.load_state_dict(torch.load(modelLocation))
+    model.load_state_dict(torch.load(modelLocation,map_location=device))
     model.eval()
     model.to(device)
 
