@@ -35,9 +35,11 @@ def normalize(data):
         
 
 class RootDataset(udata.Dataset):
-    def __init__(self, path, sigFiles, bkgFiles, eventVar, jetVar, numOfJetsToKeep):
+    def __init__(self, path, sigFiles, bkgFiles, eventVar, jetVar, dcorrVar, weights, numOfJetsToKeep):
         self.eventVar = eventVar
         self.jetVar = jetVar
+        self.weights = weights
+        self.dcorrVar = dcorrVar
         bkgData, bkgNames = self.open_data(path, bkgFiles, 0, numOfJetsToKeep)
         sigData, sigNames = self.open_data(path, sigFiles, len(bkgFiles), numOfJetsToKeep)
         allData = pd.concat([bkgData,sigData])
@@ -49,9 +51,8 @@ class RootDataset(udata.Dataset):
         normedData= pd.concat([normedInputData,allData["label"]],axis=1)
         normedData.replace([np.inf, -np.inf], np.nan, inplace=True)
         normedData.dropna(inplace=True)
-        self.allData = pd.concat([bkgData,sigData])
+        self.allData = normedData
         self.names = pd.concat([bkgNames, sigNames])
-
     def getPara(self, fileName,paraName):
         paravalue = 0
         if "SVJ" in fileName:
@@ -84,7 +85,8 @@ class RootDataset(udata.Dataset):
                 vars = pd.concat([vars, var]) if vars is not None else var
                 print("Number of events: {}".format(len(var)))
                 name = pd.DataFrame()
-                name["w"]     = [1.0]*len(var) # replace with the branch for weights
+                name["dcorrVar"]     = f["tree"].arrays(self.dcorrVar,  library="pd") 
+                name["w"]     = f["tree"].arrays(self.weights,  library="pd") 
                 name["mMed"]  = [self.getPara(fileName,  "mMed")]*len(var)
                 name["mDark"] = [self.getPara(fileName, "mDark")]*len(var)
                 name["rinv"]  = [self.getPara(fileName,  "rinv")]*len(var)
@@ -100,6 +102,7 @@ class RootDataset(udata.Dataset):
         return dict(
             data=torch.tensor(data),
             label=torch.tensor(label, dtype=torch.long),
+            dcorrVar = torch.tensor(self.names["dcorrVar"].iloc[idx]),
             w = torch.tensor(self.names["w"].iloc[idx]),
             mMed = torch.tensor(self.names["mMed"].iloc[idx]),
             mDark = torch.tensor(self.names["mDark"].iloc[idx]),
@@ -114,8 +117,9 @@ if __name__=="__main__":
     args = parser.parse_args()
     ds = args.dataset
     ft = args.features
+    tr = args.training
 
-    dataset = RootDataset(ds.path, ds.signal, ds.background, ft.eventVariables, ft.jetVariables, ft.numOfJetsToKeep)
+    dataset = RootDataset(ds.path, ds.signal, ds.background, ft.eventVariables, ft.jetVariables, ft.dcorrVar, tr.weights, ft.numOfJetsToKeep)
     loader = udata.DataLoader(dataset=dataset, batch_size=dataset.__len__(), num_workers=0)
     x = next(iter(loader))
     print("Data")
@@ -140,4 +144,3 @@ if __name__=="__main__":
     x = next(iter(loader))
     print(x["data"])
     print(x["label"])
-    print(npdata.shape)

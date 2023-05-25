@@ -32,7 +32,7 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 def processBatch(args, device, data, model, criterion, lambdas):
-    data, label = data["data"], data["label"]
+    data, dcorrVar, label = data["data"], data["dcorrVar"], data["label"]
     l1, l2, lgr, ldc = lambdas
     #print("\n Initial GPU Usage")
     #gpu_usage()
@@ -51,14 +51,14 @@ def processBatch(args, device, data, model, criterion, lambdas):
     outTag = outSoftmax[:,signalIndex]
     normedweight = torch.ones_like(outTag)
     # disco signal parameter
-    #sgpVal = pT.squeeze(1).to(device)
-    #mask = sgpVal.gt(signalIndex-1).to(device)
-    #maskedoutTag = torch.masked_select(outTag, mask)
-    #maskedsgpVal = torch.masked_select(sgpVal, mask)
-    #maskedweight = torch.masked_select(normedweight, mask)
-    #batch_loss_dc = distance_corr(maskedoutTag.to(device), maskedsgpVal.to(device), maskedweight.to(device), 1).to(device)
-    #lambdaDC = ldc
-    return l1*batch_loss #, lambdaDC*batch_loss_dc, batch_loss_dc
+    sgpVal = dcorrVar.to(device)
+    mask = sgpVal.gt(signalIndex-1).to(device)
+    maskedoutTag = torch.masked_select(outTag, mask)
+    maskedsgpVal = torch.masked_select(sgpVal, mask)
+    maskedweight = torch.masked_select(normedweight, mask)
+    batch_loss_dc = distance_corr(maskedoutTag.to(device), maskedsgpVal.to(device), maskedweight.to(device), 1).to(device)
+    lambdaDC = ldc
+    return l1*batch_loss, lambdaDC*batch_loss_dc
 
 def main():
     rng = np.random.RandomState(2022)
@@ -89,7 +89,8 @@ def main():
     ds = args.dataset
     hyper = args.hyper
     ft = args.features
-    dataset = RootDataset(ds.path, ds.signal, ds.background, ft.eventVariables, ft.jetVariables, ft.numOfJetsToKeep)
+    tr = args.training
+    dataset = RootDataset(ds.path, ds.signal, ds.background, ft.eventVariables, ft.jetVariables, ft.dcorrVar, tr.weights, ft.numOfJetsToKeep)
     sizes = get_sizes(len(dataset), ds.sample_fractions)
     train, val, test = udata.random_split(dataset, sizes, generator=torch.Generator().manual_seed(42))
     loader_train = udata.DataLoader(dataset=train, batch_size=hyper.batchSize, num_workers=0, shuffle=True)
@@ -143,28 +144,28 @@ def main():
             model.train()
             model.zero_grad()
             optimizer.zero_grad()
-            batch_loss_tag = processBatch(args, device, data, model, criterion, [hyper.lambdaTag, hyper.lambdaReg, hyper.lambdaGR, hyper.lambdaDC])
-            batch_loss_total = batch_loss_tag # + batch_loss_dc
+            batch_loss_tag, batch_loss_dc = processBatch(args, device, data, model, criterion, [hyper.lambdaTag, hyper.lambdaReg, hyper.lambdaGR, hyper.lambdaDC])
+            batch_loss_total = batch_loss_tag + batch_loss_dc
             batch_loss_total.backward()
             optimizer.step()
             model.eval()
             train_loss_tag += batch_loss_tag.item()
-            #train_loss_dc += batch_loss_dc.item()
+            train_loss_dc += batch_loss_dc.item()
             #train_dc_val += dc_val.item()
             train_loss_total += batch_loss_total.item()
             # writer.add_scalar('training loss', train_loss_total / 1000, epoch * len(loader_train) + i)
         train_loss_tag /= len(loader_train)
-        #train_loss_dc /= len(loader_train)
+        train_loss_dc /= len(loader_train)
         #train_dc_val /= len(loader_train)
         train_loss_total /= len(loader_train)
         training_losses_tag[epoch] = train_loss_tag
-        #training_losses_dc[epoch] = train_loss_dc
+        training_losses_dc[epoch] = train_loss_dc
         training_losses_total[epoch] = train_loss_total
         if np.isnan(train_loss_tag):
             print("nan in training")
             break
         print("t_tag: "+ str(train_loss_tag))
-        #print("t_dc: "+ str(train_loss_dc))
+        print("t_dc: "+ str(train_loss_dc))
         #print("t_dc_val: "+ str(train_dc_val))
         print("t_total: "+ str(train_loss_total))
 
@@ -174,26 +175,26 @@ def main():
         val_dc_val = 0
         val_loss_total = 0
         for i, data in enumerate(loader_val):
-            output_loss_tag = processBatch(args, device, data, model, criterion, [hyper.lambdaTag, hyper.lambdaReg, hyper.lambdaGR, hyper.lambdaDC])
-            output_loss_total = output_loss_tag # + output_loss_dc
+            output_loss_tag, output_loss_dc = processBatch(args, device, data, model, criterion, [hyper.lambdaTag, hyper.lambdaReg, hyper.lambdaGR, hyper.lambdaDC])
+            output_loss_total = output_loss_tag + output_loss_dc
             val_loss_tag += output_loss_tag.item()
-            # val_loss_dc += output_loss_dc.item()
+            val_loss_dc += output_loss_dc.item()
             # val_dc_val += dc_val.item()
             val_loss_total += output_loss_total.item()
         val_loss_tag /= len(loader_val)
-        #val_loss_dc /= len(loader_val)
+        val_loss_dc /= len(loader_val)
         #val_dc_val /= len(loader_val)
         val_loss_total /= len(loader_val)
         scheduler.step()
         #scheduler.step(torch.tensor([val_loss_total]))
         validation_losses_tag[epoch] = val_loss_tag
-        #validation_losses_dc[epoch] = val_loss_dc
+        validation_losses_dc[epoch] = val_loss_dc
         validation_losses_total[epoch] = val_loss_total
         if np.isnan(val_loss_tag):
             print("nan in val")
             break
         print("v_tag: "+ str(val_loss_tag))
-        #print("v_dc: "+ str(val_loss_dc))
+        print("v_dc: "+ str(val_loss_dc))
         #print("v_dc_val: "+ str(val_dc_val))
         print("v_total: "+ str(val_loss_total))
         # save the model
@@ -206,17 +207,23 @@ def main():
     # writer.close()
 
     # plot loss/epoch for training and validation sets
-    print("Making basic validation plots")
-    #training_tag = plt.plot(training_losses_tag, label='training_tag')
-    #validation_tag = plt.plot(validation_losses_tag, label='validation_tag')
-    #training_dc = plt.plot(training_losses_dc, label='training_dc')
-    #validation_dc = plt.plot(validation_losses_dc, label='validation_dc')
-    training_total = plt.plot(training_losses_total, label='training_total')
-    validation_total = plt.plot(validation_losses_total, label='validation_total')
-    plt.xlabel("epoch")
-    plt.ylabel("Loss")
-    plt.legend()
+    print("Making loss plot")
+    fig, ax = plt.subplots()
+    ax.plot(training_losses_tag, label='training_tag')
+    ax.plot(validation_losses_tag, label='validation_tag')
+    ax.plot(training_losses_total, label='training_total')
+    ax.plot(validation_losses_total, label='validation_total')
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("Loss")
+    ax2 = ax.twinx()
+    ax2.plot(training_losses_dc, label='training_dc',linestyle="--")
+    ax2.plot(validation_losses_dc, label='validation_dc',linestyle="--")
+    ax2.set_ylabel("Disco Loss")
+    ax.legend(loc="upper right")
+    ax2.legend(loc="center right")
     plt.savefig(args.outf + "/loss_plot.png")
+    np.savez(args.outf + "/losses",training_losses_tag=training_losses_tag,validation_losses_tag=validation_losses_tag,training_losses_dc=training_losses_dc,
+             validation_losses_dc=validation_losses_dc,training_losses_total=training_losses_total,validation_losses_total=validation_losses_total)
 
     parser.write_config(args, args.outf + "/config_out.py")
 

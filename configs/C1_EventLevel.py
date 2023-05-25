@@ -1,7 +1,7 @@
 from magiconfig import MagiConfig
 
 config = MagiConfig(dataset=MagiConfig(), features=MagiConfig(), training=MagiConfig(), hyper=MagiConfig())
-config.dataset.path = "~/uscmshome/nobackup/SVJ/eventLevelTagger/trainingFiles/"
+config.dataset.path = "~/uscmshome/nobackup/SVJ/t-channel_QualityStudy/t-channel_Analysis/preselec_eventTagger_trainingFiles/"
 config.dataset.signal = {
 							"signal":		[
 												"tree_SVJ_mMed-1000_mDark-20_rinv-0p3_alpha-peak_yukawa-1_NN",
@@ -68,6 +68,7 @@ config.features.jetVariables = [
 'jPtAK8', 
 'jEtaAK8', 
 'jPhiAK8', 
+'jEAK8', 
 # 'jGirthAK8',
 # 'jAxismajorAK8',
 # 'jAxisminorAK8',
@@ -78,19 +79,21 @@ config.features.jetVariables = [
 'dPhijMETAK8', 
 #'JetsAK8_hvCategory', 
 #'JetsAK8_darkPtFrac', 
-# 'nnOutput',
+'nnOutput',
 ]
+config.features.dcorrVar = "met"
 config.features.numOfJetsToKeep = 2
+config.training.weights = "evtw"
 # hyperparameters
 config.hyper.learning_rate = 0.001
 config.hyper.batchSize = 512
 config.hyper.num_of_layers = 5
 config.hyper.num_of_nodes = 200
 config.hyper.dropout = 0.3
-config.hyper.epochs = 80
+config.hyper.epochs = 120
 config.hyper.lambdaTag = 1.0
 config.hyper.lambdaReg = 0.0
 config.hyper.lambdaGR = 1.0 # keep this at 1 and change lambdaReg only
-config.hyper.lambdaDC = 0.0
+config.hyper.lambdaDC = 0.1
 config.hyper.rseed = 100
 config.hyper.num_classes = 3
