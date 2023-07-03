@@ -9,7 +9,7 @@ import torch.utils.data as udata
 import torch.optim as optim
 import os
 from models import DNN, DNN_GRF
-from dataset import RootDataset, get_sizes
+from dataset import RootDataset
 import matplotlib.pyplot as plt
 from magiconfig import ArgumentParser, MagiConfigOptions, ArgumentDefaultsRawHelpFormatter
 from configs import configs as c
@@ -18,6 +18,7 @@ from tqdm import tqdm
 from Disco import distance_corr
 import copy
 from GPUtil import showUtilization as gpu_usage
+from dataset_sampler import getDataset
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -56,9 +57,42 @@ def processBatch(args, device, data, model, criterion, lambdas):
     maskedoutTag = torch.masked_select(outTag, mask)
     maskedsgpVal = torch.masked_select(sgpVal, mask)
     maskedweight = torch.masked_select(normedweight, mask)
-    batch_loss_dc = distance_corr(maskedoutTag.to(device), maskedsgpVal.to(device), maskedweight.to(device), 1).to(device)
+    batch_loss_dc = distance_corr(1,maskedoutTag.to(device), maskedsgpVal.to(device), maskedweight.to(device)).to(device)
     lambdaDC = ldc
     return l1*batch_loss, lambdaDC*batch_loss_dc
+
+def plotEverything(trainData, trainNonTrainingInfo, kind="train"):
+# ['njetsAK8', 'mT', 'METrHT_pt30', 'dEtaj12AK8', 'dRJ12AK8',
+       # 'dPhiMinjMETAK8', 'jPtAK8[0]', 'jPtAK8[1]', 'jEtaAK8[0]', 'jEtaAK8[1]',
+       # 'jPhiAK8[0]', 'jPhiAK8[1]', 'jEAK8[0]', 'jEAK8[1]', 'dPhijMETAK8[0]',
+       # 'dPhijMETAK8[1]', 'label']
+    labels = trainData["label"]
+    labDict = {}
+    labDict["qcd"] = labels == 0
+    labDict["ttj"] = labels == 1
+    labDict["svj"] = labels == 2
+    for inVar in list(trainData.columns):
+        varData = trainData[inVar]
+        plt.figure()
+        if inVar == "label":
+            h,b,d = plt.hist(varData[labDict["qcd"]],bins=np.arange(0,4,1),label="qcd",alpha=0.3)
+        else:
+            h,b,d = plt.hist(varData[labDict["qcd"]],bins=50,label="qcd",alpha=0.3)
+        for label,labCond in labDict.items():
+            if label == "qcd": continue
+            plt.hist(varData[labCond],bins=b,label=label,alpha=0.3)
+        plt.legend()
+        plt.xlabel(inVar)
+        plt.savefig(f"{inVar}_{kind}.png")
+    plt.figure()
+    varData = trainNonTrainingInfo["dcorrVar"]
+    h,b,d = plt.hist(varData[labDict["qcd"]],bins=50,label="qcd",alpha=0.3)
+    for label,labCond in labDict.items():
+        if label == "qcd": continue
+        plt.hist(varData[labCond],bins=b,label=label,alpha=0.3)
+    plt.legend()
+    plt.xlabel("met")
+    plt.savefig(f"dcorrVar_{kind}.png")
 
 def main():
     rng = np.random.RandomState(2022)
@@ -90,15 +124,17 @@ def main():
     hyper = args.hyper
     ft = args.features
     tr = args.training
-    dataset = RootDataset(ds.path, ds.signal, ds.background, ft.eventVariables, ft.jetVariables, ft.dcorrVar, tr.weights, ft.numOfJetsToKeep)
-    sizes = get_sizes(len(dataset), ds.sample_fractions)
-    train, val, test = udata.random_split(dataset, sizes, generator=torch.Generator().manual_seed(42))
+    trainData, trainNonTrainingInfo, trainData_nonUniform, trainNonTrainingInfo_nonUniform, valData, valNonTrainingInfo, testData, testNonTrainingInfo = getDataset(ds.path, ds.signal, ds.background, ds.sample_fractions, ft.eventVariables, ft.jetVariables, ft.dcorrVar, tr.weights, ft.numOfJetsToKeep,ds.flatMET)
+    # sanity check: plotting input variables
+    # plotEverything(trainData, trainNonTrainingInfo, kind="train")
+    # plotEverything(valData, valNonTrainingInfo, kind="val")
+    train = RootDataset(trainData, trainNonTrainingInfo)
+    val = RootDataset(valData, valNonTrainingInfo)
     loader_train = udata.DataLoader(dataset=train, batch_size=hyper.batchSize, num_workers=0, shuffle=True)
     loader_val = udata.DataLoader(dataset=val, batch_size=hyper.batchSize, num_workers=0, shuffle=False)
 
     # Build model
     model = DNN(n_var=len(train[0]["data"]), n_layers=hyper.num_of_layers, n_nodes=hyper.num_of_nodes, n_outputs=hyper.num_classes, drop_out_p=hyper.dropout).to(device=device)
-    #model = DNN_GRF(n_var=len(varSet), n_layers_features=hyper.num_of_layers_features, n_layers_tag=hyper.num_of_layers_tag, n_layers_pT=hyper.num_of_layers_pT, n_nodes=hyper.num_of_nodes, n_outputs=2, n_pTBins=hyper.n_pTBins, drop_out_p=hyper.dropout).to(device=device)
     if (args.model == None):
         #model.apply(init_weights)
         print("Creating new model ")
@@ -142,13 +178,11 @@ def main():
         train_loss_total = 0
         for i, data in tqdm(enumerate(loader_train), unit="batch", total=len(loader_train)):
             model.train()
-            model.zero_grad()
             optimizer.zero_grad()
             batch_loss_tag, batch_loss_dc = processBatch(args, device, data, model, criterion, [hyper.lambdaTag, hyper.lambdaReg, hyper.lambdaGR, hyper.lambdaDC])
             batch_loss_total = batch_loss_tag + batch_loss_dc
             batch_loss_total.backward()
             optimizer.step()
-            model.eval()
             train_loss_tag += batch_loss_tag.item()
             train_loss_dc += batch_loss_dc.item()
             #train_dc_val += dc_val.item()
@@ -168,24 +202,28 @@ def main():
         print("t_dc: "+ str(train_loss_dc))
         #print("t_dc_val: "+ str(train_dc_val))
         print("t_total: "+ str(train_loss_total))
-
+        # Set the model to evaluation mode, disabling dropout and using population
+        # statistics for batch normalization.
+        model.eval()
         # validation
+        # Disable gradient computation and reduce memory consumption.
         val_loss_tag = 0
         val_loss_dc = 0
         val_dc_val = 0
         val_loss_total = 0
-        for i, data in enumerate(loader_val):
-            output_loss_tag, output_loss_dc = processBatch(args, device, data, model, criterion, [hyper.lambdaTag, hyper.lambdaReg, hyper.lambdaGR, hyper.lambdaDC])
-            output_loss_total = output_loss_tag + output_loss_dc
-            val_loss_tag += output_loss_tag.item()
-            val_loss_dc += output_loss_dc.item()
-            # val_dc_val += dc_val.item()
-            val_loss_total += output_loss_total.item()
+        with torch.no_grad():
+            for i, data in enumerate(loader_val):
+                output_loss_tag, output_loss_dc = processBatch(args, device, data, model, criterion, [hyper.lambdaTag, hyper.lambdaReg, hyper.lambdaGR, hyper.lambdaDC])
+                output_loss_total = output_loss_tag + output_loss_dc
+                val_loss_tag += output_loss_tag.item()
+                val_loss_dc += output_loss_dc.item()
+                # val_dc_val += dc_val.item()
+                val_loss_total += output_loss_total.item()
         val_loss_tag /= len(loader_val)
         val_loss_dc /= len(loader_val)
         #val_dc_val /= len(loader_val)
         val_loss_total /= len(loader_val)
-        scheduler.step()
+        # scheduler.step()
         #scheduler.step(torch.tensor([val_loss_total]))
         validation_losses_tag[epoch] = val_loss_tag
         validation_losses_dc[epoch] = val_loss_dc
@@ -199,10 +237,11 @@ def main():
         print("v_total: "+ str(val_loss_total))
         # save the model
         model.eval()
-        torch.save(model.state_dict(), "{}/net_{}.pth".format(args.outf,epoch))
+        # torch.save(model.state_dict(), "{}/net_{}.pth".format(args.outf,epoch))
         torch.cuda.empty_cache()
+        np.savez(args.outf + "/losses",training_losses_tag=training_losses_tag,validation_losses_tag=validation_losses_tag,training_losses_dc=training_losses_dc,
+             validation_losses_dc=validation_losses_dc,training_losses_total=training_losses_total,validation_losses_total=validation_losses_total)
     # save the model
-    model.eval()
     torch.save(model.state_dict(), modelLocation)
     # writer.close()
 
@@ -222,8 +261,6 @@ def main():
     ax.legend(loc="upper right")
     ax2.legend(loc="center right")
     plt.savefig(args.outf + "/loss_plot.png")
-    np.savez(args.outf + "/losses",training_losses_tag=training_losses_tag,validation_losses_tag=validation_losses_tag,training_losses_dc=training_losses_dc,
-             validation_losses_dc=validation_losses_dc,training_losses_total=training_losses_total,validation_losses_total=validation_losses_total)
 
     parser.write_config(args, args.outf + "/config_out.py")
 
