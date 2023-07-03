@@ -45,6 +45,7 @@ config.dataset.background =  {
 											]
 }
 config.dataset.sample_fractions = [0.7, 0.15, 0.15]
+config.dataset.flatMET = False
 config.features.eventVariables = [
 #'njets', 
 'njetsAK8', 
@@ -79,7 +80,7 @@ config.features.jetVariables = [
 'dPhijMETAK8', 
 #'JetsAK8_hvCategory', 
 #'JetsAK8_darkPtFrac', 
-'nnOutput',
+# 'nnOutput',
 ]
 config.features.dcorrVar = "met"
 config.features.numOfJetsToKeep = 2
@@ -90,10 +91,10 @@ config.hyper.batchSize = 512
 config.hyper.num_of_layers = 5
 config.hyper.num_of_nodes = 200
 config.hyper.dropout = 0.3
-config.hyper.epochs = 120
+config.hyper.epochs = 50
 config.hyper.lambdaTag = 1.0
 config.hyper.lambdaReg = 0.0
 config.hyper.lambdaGR = 1.0 # keep this at 1 and change lambdaReg only
-config.hyper.lambdaDC = 0.1
-config.hyper.rseed = 100
+config.hyper.lambdaDC = 0.0
+config.hyper.rseed = 1000
 config.hyper.num_classes = 3
