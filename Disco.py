@@ -1,6 +1,6 @@
 import torch
 
-def distance_corr(var_1, var_2, normedweight, power=1):
+def distance_corr(power, var_1, var_2, normedweight):
     """
     From https://github.com/okitouni/DisCo
     var_1: First variable to decorrelate (eg mass)
@@ -12,7 +12,6 @@ def distance_corr(var_1, var_2, normedweight, power=1):
 
     Usage: Add to your loss function. total_loss = BCE_loss + lambda * distance_corr
     """
-
     xx = var_1.view(-1, 1).expand(len(var_1), len(var_1)).view(len(var_1), len(var_1))
     yy = var_1.expand(len(var_1), len(var_1)).view(len(var_1), len(var_1))
     amat = (xx-yy).abs()
@@ -42,4 +41,3 @@ def distance_corr(var_1, var_2, normedweight, power=1):
     dCorr = (torch.sqrt(ABavg)) / torch.sqrt((torch.sqrt(AAavg) * torch.sqrt(BBavg)))
 
     return dCorr
-
