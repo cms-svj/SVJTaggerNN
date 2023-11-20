@@ -4,9 +4,8 @@ from torch.nn import functional as f
 import torch.utils.data as udata
 from torch.cuda.amp import autocast
 import os
-import particlenet_pf
 from models import DNN, DNN_GRF
-from dataset import RootDataset, get_sizes
+from dataset import RootDataset
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from magiconfig import ArgumentParser, MagiConfigOptions, ArgumentDefaultsRawHelpFormatter
@@ -22,6 +21,8 @@ import copy
 from GPUtil import showUtilization as gpu_usage
 import seaborn as sns
 import mplhep as hep
+from dataset_sampler import getDataset
+from Disco import distance_corr
 
 mpl.rc("font", family="serif", size=18)
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -62,18 +63,20 @@ def getNNOutput(dataset, model, device, signalIndex=2):
     rawOutputs = np.array([])
     allOutputs = np.array([])
     inputFileIndices = np.array([])
-    pT = np.array([])
+    dcorrVars = np.array([])
+    sts = np.array([])
     weight = np.array([])
     meds = np.array([])
     darks = np.array([])
     rinvs = np.array([])
     loader = udata.DataLoader(dataset=dataset, batch_size=batchSize, num_workers=0)
     for i, data in tqdm(enumerate(loader), unit="batch", total=len(loader)):
-        data, l, w, med, dark, rinv = data["data"], data["label"], data["w"], data["mMed"], data["mDark"], data["rinv"]
+        data, dcorrVar, st, l, w, med, dark, rinv = data["data"], data["dcorrVar"], data["st"], data["label"], data["w"], data["mMed"], data["mDark"], data["rinv"]
         #l, points, features, masks, inputFileIndex, p, w, med, dark, rinv = data
         labels = np.concatenate((labels,l.numpy()))
         #inputFileIndices = np.concatenate((inputFileIndices,inputFileIndex.squeeze(1).numpy()))
-        #pT = np.concatenate((pT,p.squeeze(1).float().numpy()))
+        dcorrVars = np.concatenate((dcorrVars,dcorrVar.float().numpy()))
+        sts = np.concatenate((sts,st.float().numpy()))
         weight = np.concatenate((weight,w.float().numpy()))
         meds = np.concatenate((meds,med.float().numpy()))
         darks = np.concatenate((darks,dark.float().numpy()))
@@ -97,7 +100,7 @@ def getNNOutput(dataset, model, device, signalIndex=2):
             targetLabels = np.concatenate((targetLabels,targetLabel))
         # if i == 500:
         #     break
-    return targetLabels, allOutputs, np.array(rawOutputs), inputFileIndices, pT, weight, meds, darks, rinvs
+    return targetLabels, allOutputs, np.array(rawOutputs), inputFileIndices, dcorrVars, sts, weight, meds, darks, rinvs
 
 def getROCStuff(label, output, weights=None):
     fpr, tpr, thresholds = roc_curve(label, output, sample_weight=weights)
@@ -469,22 +472,41 @@ def main():
     ds = args.dataset
     hyper = args.hyper
     ft = args.features
-    dataset = RootDataset(ds.path, ds.signal, ds.background, ft.eventVariables, ft.jetVariables)
-    sizes = get_sizes(len(dataset), ds.sample_fractions)
-    train, val, test = udata.random_split(dataset, sizes, generator=torch.Generator().manual_seed(42))
-
+    tr = args.training
+    trainData, trainNonTrainingInfo, trainData_nonUniform, trainNonTrainingInfo_nonUniform, valData, valNonTrainingInfo, testData, testNonTrainingInfo = getDataset(ds.path, ds.signal, ds.background, ds.sample_fractions, ft.eventVariables, ft.jetVariables, ft.dcorrVar, tr.weights, ft.numOfJetsToKeep,ds.flatMET)
+    train = RootDataset(trainData_nonUniform, trainNonTrainingInfo_nonUniform)
+    test = RootDataset(testData, testNonTrainingInfo)
     # Build model
     model = DNN(n_var=len(train[0]["data"]), n_layers=hyper.num_of_layers, n_nodes=hyper.num_of_nodes, n_outputs=hyper.num_classes, drop_out_p=hyper.dropout).to(device=device)
     #model = DNN_GRF(n_var=len(varSet), n_layers_features=hyper.num_of_layers_features, n_layers_tag=hyper.num_of_layers_tag, n_layers_pT=hyper.num_of_layers_pT, n_nodes=hyper.num_of_nodes, n_outputs=2, n_pTBins=hyper.n_pTBins, drop_out_p=hyper.dropout).to(device=device)
     model = copy.deepcopy(model)
     print("Loading model from file " + modelLocation)
-    model.load_state_dict(torch.load(modelLocation))
+    model.load_state_dict(torch.load(modelLocation,map_location=device))
     model.eval()
     model.to(device)
 
-    label_test, output_test_tag, rawOutputs_test, inpIndex_test, pT_test, w_test, med_test, dark_test, rinv_test = getNNOutput(test, model, device)
-    print("all unique label_test",np.unique(label_test))
-    print("all unique output_test_tag",np.unique(output_test_tag))
+    label_test, output_test_tag, rawOutputs_test, inpIndex_test, dcorrVar_test, st_test, w_test, med_test, dark_test, rinv_test = getNNOutput(test, model, device)
+    ## sanity check: calculating disco and pearson correlation for test dataset
+    # normedweight = np.ones_like(output_test_tag)
+    # print("all unique label_test",np.unique(label_test))
+    # print("all unique output_test_tag",np.unique(output_test_tag))
+    # print("rawOutputs_test",rawOutputs_test.shape)
+    # nnScore_test = torch.Tensor(np.round(rawOutputs_test[:,2],4))
+    # dcorrVar_test = torch.Tensor(np.round(dcorrVar_test,4))
+    # st_test = torch.Tensor(np.round(st_test,4))
+    # normedweight = torch.Tensor(normedweight)
+    # for i in range(3):
+    #     cond = label_test == i
+    #     print(f"label {i}")
+    #     discoVal = distance_corr(1, nnScore_test[cond][:1000], dcorrVar_test[cond][:1000], normedweight[cond][:1000])
+    #     print(f"discoVal (MET): {discoVal}")
+    #     corr = np.corrcoef(nnScore_test[cond],dcorrVar_test[cond])[0,1]
+    #     print(f"Pearson corr (MET): {corr}")
+    #     discoVal = distance_corr(1, nnScore_test[cond][:1000], st_test[cond][:1000], normedweight[cond][:1000])
+    #     print(f"discoVal (ST): {discoVal}")
+    #     corr = np.corrcoef(nnScore_test[cond],st_test[cond])[0,1]
+    #     print(f"Pearson corr (ST): {corr}")
+    #     print()
 
     # 2D plots of ROC vs signal parameters
     ## get auc for just baseline
@@ -532,21 +554,20 @@ def main():
 
         plot2DNNScore(baseline,baselineScore,meds,medScores,darks,darkScores,"mDark",bkgLab,args.outf)
         plot2DNNScore(baseline,baselineScore,meds,medScores,rinvs,rinvScores,"rinv",bkgLab,args.outf)
-    # raise Exception("Arretez")
 
-    ## Correlation between pT and NN Score
-    #for mainClass in jetClassDict:
-    #    mainClassName = mainClass[0]
-    #    mainClassNum = mainClass[1]
-    #    classCond = label_test == mainClassNum 
-    #    pT_test_class = pT_test[classCond]
-    #    w_test_class = w_test[classCond]
-    #    for asClass in jetClassDict:
-    #        asClassName = asClass[0]
-    #        asClassNum = asClass[1]
-    #        output_test_tag_class = rawOutputs_test[classCond][:,asClassNum]
-    #        plotByBin(binVar=pT_test_class,binVarBins = np.arange(250,2000,500),histVar=output_test_tag_class,xlabel="NN Score",varLab="pT",outDir=args.outf,plotName="SNNperpT_{}_as_{}".format(mainClassName,asClassName),xlim=[0,1.02],weights=w_test_class,histBinEdge=np.arange(-0.01, 1.02, 0.02),performanceMetrics=performanceMetrics)
-    #        plotByBin(binVar=output_test_tag_class,binVarBins = np.arange(0.1,1,0.2),histVar=pT_test_class,xlabel="Jet $p_T (GeV)$",varLab="SNN",outDir=args.outf,plotName="pTperSNN_{}_as_{}".format(mainClassName,asClassName),xlim=[0,3000],weights=w_test_class,histBinEdge=np.arange(-30,3001,60),performanceMetrics=performanceMetrics)
+    ## Correlation between dcorrVar and NN Score
+    for mainClass in jetClassDict:
+        mainClassName = mainClass[0]
+        mainClassNum = mainClass[1]
+        classCond = label_test == mainClassNum 
+        dcorrVar_test_class = dcorrVar_test[classCond]
+        w_test_class = w_test[classCond]
+        for asClass in jetClassDict:
+            asClassName = asClass[0]
+            asClassNum = asClass[1]
+            output_test_tag_class = rawOutputs_test[classCond][:,asClassNum]
+            plotByBin(binVar=dcorrVar_test_class,binVarBins = np.arange(0,1000,200),histVar=output_test_tag_class,xlabel="NN Score",varLab="{}".format(ft.dcorrVar),outDir=args.outf,plotName="SNNper{}_{}_as_{}".format(ft.dcorrVar,mainClassName,asClassName),xlim=[0,1.02],weights=w_test_class,histBinEdge=np.arange(-0.01, 1.02, 0.05),performanceMetrics=performanceMetrics)
+            plotByBin(binVar=output_test_tag_class,binVarBins = np.arange(0.1,1,0.2),histVar=dcorrVar_test_class,xlabel="{}".format(ft.dcorrVar),varLab="SNN",outDir=args.outf,plotName="{}perSNN_{}_as_{}".format(ft.dcorrVar,mainClassName,asClassName),xlim=[0,1500],weights=w_test_class,histBinEdge=np.arange(-50,1501,50),performanceMetrics=performanceMetrics)
 
     # making confusion matrix to see which jet categories are harder to classify
     print("output_test_tag",np.unique(output_test_tag,return_counts=True))
@@ -567,7 +588,7 @@ def main():
     plotConfusionMatrix(label_test, wpt_outputs, w_test, jetClassDict, args.outf, plotLabel="WorkingPts")
     plotConfusionMatrix(label_test, wpt_outputs, np.ones(len(w_test)), jetClassDict, args.outf, plotLabel="WorkingPts_unweighted")
     # making discrimination and ROC plots for different jet categories for the OvO and OvR cases
-    label_train, output_train_tag, rawOutputs_train, inpIndex_train, pT_train, w_train, med_train, dark_train, rinv_train = getNNOutput(train, model, device)
+    label_train, output_train_tag, rawOutputs_train, inpIndex_train, dcorrVar_train, st_train, w_train, med_train, dark_train, rinv_train = getNNOutput(train, model, device)
     combos = list(itertools.product(range(len(jetClassDict)),range(len(jetClassDict))))
     for combo in combos:
         base = combo[0]
