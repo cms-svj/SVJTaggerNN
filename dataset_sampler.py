@@ -83,21 +83,19 @@ def get_sizes(l, frac=[0.8, 0.1, 0.1]):
     val_size = l - train_size - test_size
     return [train_size, test_size, val_size]
 
-def normalize(data):
+def normalize(data,nonTrainingInfo):
     copyData = data.copy(deep=True)
+    met = nonTrainingInfo["dcorrVar"]
+    st = nonTrainingInfo["st"]
     for column in copyData.columns:
-        if "jEtaAK8" in column:
-            copyData[column] = abs(copyData[column])
-        elif column in ["METrHT_pt30","dEtaj12AK8","dRJ12AK8","dPhiMinjMETAK8"]:
-            continue
-        elif "dPhijMETAK8" in column:
-            continue
-        elif "jPhiAK8" in column:
-            continue
-        elif "nnOutput" in column:
-            continue
-        else:
+        if column in ["njetsAK8","mT"]:
             copyData[column] = np.log(copyData[column])
+        elif "jPtAK8" in column:
+            copyData[column] = np.log(copyData[column])
+        elif "jEAK8" in column:
+            copyData[column] = np.log(copyData[column])
+        elif "jEtaAK8" in column:
+            copyData[column] = abs(copyData[column])
     return(copyData)
 
 def getPara(fileName,paraName):
@@ -122,6 +120,14 @@ def scale_weight(inputFileIndices_subset,inputFileIndices,nonTrainingInfo):
         scale = scales[i]
         nonTrainingInfo['w'][inputFileIndices_subset == uIn_sub] *= scale
 
+# after updating uproot, this function is needed to get the jet information
+def jetVarDFConverter(jetvarDict,numOfJetsToKeep):
+    jetvarDF = pd.DataFrame()
+    for key, jetvarValArray in jetvarDict.items():
+        for i in range(numOfJetsToKeep):
+            jetvarDF[f"{key}[{i}]"] = jetvarValArray[:,i]
+    return jetvarDF
+        
 def open_data(path, dataFiles, fileDictForOffset, eventVar, jetVar, dcorrVar, weights, numOfJetsToKeep):
     vars = None
     names = None
@@ -135,13 +141,11 @@ def open_data(path, dataFiles, fileDictForOffset, eventVar, jetVar, dcorrVar, we
         fileList = dataFiles[key]
         for fileName in fileList:
             f = up.open(path  + fileName + ".root")
-            eventvar = f["tree"].arrays(eventVar,  library="pd")#.head(100)
-            jetvar = f["tree"].arrays(jetVar,  library="pd")#.head(100)
-            regex = ""
-            for nj in range(numOfJetsToKeep):
-                regex += '\['+str(nj)+'\]|'
-            jetvar = jetvar.filter(regex=regex[:-1])
-            var = pd.concat([eventvar , jetvar ],axis=1)
+            eventvarDF = f["tree"].arrays(eventVar,  library="pd")#.head(100)
+            jetvarDF = f["tree"].arrays(jetVar,  library="pd")
+            # jetvarDict = f["tree"].arrays(jetVar,  library="np")#.head(100)
+            # jetvarDF = jetVarDFConverter(jetvarDict,numOfJetsToKeep) # for unflattened jet variables
+            var = pd.concat([eventvarDF , jetvarDF ],axis=1)
             var["label"] = [i+labelShift]*len(var)
             vars = pd.concat([vars, var]) if vars is not None else var
             name = pd.DataFrame()
@@ -176,8 +180,6 @@ def getDataset(path, sigFiles, bkgFiles, sample_fractions, eventVar, jetVar, dco
     inputVars.remove("label")
     inputData = allData[inputVars]
     # normedData= pd.concat([inputData,allData["label"]],axis=1)
-    normedInputData = normalize(inputData)
-    normedData= pd.concat([normedInputData,allData["label"]],axis=1)
     # this part needs to be updated so that bkgNames and sigNames will be masked properly too. As of now, it's not doing anything anyway.
     # normedData.replace([np.inf, -np.inf], np.nan, inplace=True)
     # normedData.dropna(inplace=True)
@@ -185,7 +187,8 @@ def getDataset(path, sigFiles, bkgFiles, sample_fractions, eventVar, jetVar, dco
     # reference histogram is the sum of all SVJ signals' MET
     nonTrainingInfo = pd.concat([bkgNames, sigNames])
     inputFileNames = bkgInputFileNames + sigInputFileNames
-    
+    normedInputData = normalize(inputData,nonTrainingInfo)
+    normedData= pd.concat([normedInputData,allData["label"]],axis=1)    
     # split between train and the others
     trainFraction = sample_fractions[0]
     otherFraction = 1 - trainFraction

@@ -11,14 +11,17 @@ class DNN(nn.Module):
         super(DNN, self).__init__()
         layers = []
         layers.append(nn.Linear(n_var, n_nodes))
+        layers.append(nn.BatchNorm1d(n_nodes))
         layers.append(nn.ReLU())
 
-        for n in list(n_nodes for x in range(n_layers)):
+        for n in [n_nodes]*n_layers:
             layers.append(nn.Linear(n, n))
+            layers.append(nn.BatchNorm1d(n))
             layers.append(nn.ReLU())
 
         layers.append(nn.Dropout(p=drop_out_p))
         layers.append(nn.Linear(n_nodes, n_outputs))
+        layers.append(nn.BatchNorm1d(n_outputs))
 
         self.dnn = nn.Sequential(*layers)
 
@@ -41,7 +44,7 @@ class DNN_GRF(nn.Module):
 
         # Jet tagger classifier
         self.tagger = nn.Sequential()
-        for i, n in enumerate(list(n_nodes for x in range(n_layers_tag))):
+        for i, n in [n_nodes]*n_layers_tag:
             self.tagger.add_module('t_linear{}'.format(i+1), nn.Linear(n_nodes, n_nodes))
             self.tagger.add_module('t_relu{}'.format(i+1),   nn.ReLU())
             self.feature.add_module('t_batchNorm{}'.format(i+1), nn.BatchNorm1d(n_nodes))
