@@ -24,6 +24,7 @@ class RootDataset(udata.Dataset):
         return dict(
             data=torch.tensor(data),
             label=torch.tensor(label, dtype=torch.long),
+            inputFileIndices = torch.tensor(self.names["inputFileIndices"].iloc[idx]),
             dcorrVar = torch.tensor(self.names["dcorrVar"].iloc[idx]),
             st = torch.tensor(self.names["st"].iloc[idx]),
             w = torch.tensor(self.names["w"].iloc[idx]),
@@ -41,7 +42,8 @@ if __name__=="__main__":
     ds = args.dataset
     ft = args.features
     tr = args.training
-    trainData, trainNonTrainingInfo, valData, valNonTrainingInfo, testData, testNonTrainingInfo = getDataset(ds.path, ds.signal, ds.background, ds.sample_fractions, ft.eventVariables, ft.jetVariables, ft.dcorrVar, tr.weights, ft.numOfJetsToKeep)
+    # trainData, trainNonTrainingInfo, valData, valNonTrainingInfo, testData, testNonTrainingInfo = getDataset(ds.path, ds.signal, ds.background, ds.sample_fractions, ft.eventVariables, ft.jetVariables, ft.dcorrVar, tr.weights, ft.numOfJetsToKeep)
+    trainData, trainNonTrainingInfo, trainData_nonUniform, trainNonTrainingInfo_nonUniform, valData, valNonTrainingInfo, testData, testNonTrainingInfo = getDataset(ds.path, ds.signal, ds.background, ds.sample_fractions, ft.eventVariables, ft.jetVariables, ft.dcorrVar, tr.weights, ft.numOfJetsToKeep,ds.flatMET)
     dataset = RootDataset(trainData,trainNonTrainingInfo)
     loader = udata.DataLoader(dataset=dataset, batch_size=dataset.__len__(), num_workers=0)
     x = next(iter(loader))
